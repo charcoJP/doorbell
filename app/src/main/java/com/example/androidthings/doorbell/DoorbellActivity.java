@@ -18,15 +18,18 @@ package com.example.androidthings.doorbell;
 import android.Manifest;
 import android.app.Activity;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.media.Image;
 import android.media.ImageReader;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.os.Looper;
 import android.util.Base64;
 import android.util.Log;
+import android.widget.ImageView;
 
-import com.google.android.things.contrib.driver.button.Button;
 import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
 import com.google.firebase.database.ServerValue;
@@ -34,6 +37,10 @@ import com.google.firebase.database.ServerValue;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Map;
+import java.util.TimerTask;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Doorbell activity that capture a picture from the Raspberry Pi 3
@@ -45,11 +52,6 @@ public class DoorbellActivity extends Activity {
 
     private FirebaseDatabase mDatabase;
     private DoorbellCamera mCamera;
-
-    /*
-     * Driver for the doorbell button;
-     */
-    private Button mButton;
 
     /**
      * A {@link Handler} for running Camera tasks in the background.
@@ -71,16 +73,18 @@ public class DoorbellActivity extends Activity {
      */
     private HandlerThread mCloudThread;
 
-    /**
-     * The GPIO pin to activate to listen for button presses.
-     */
-    private final String BUTTON_GPIO_PIN = "BCM21";
+    private ImageView mImageView;
 
-
+    private Handler mHandler = new Handler(Looper.getMainLooper());
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         Log.d(TAG, "Doorbell Activity created.");
+
+        setContentView(R.layout.activity_main);
+
+        mImageView = (ImageView) findViewById(R.id.imageView);
+        mImageView.setImageResource(R.drawable.common_full_open_on_phone);
 
         // We need permission to access the camera
         if (checkSelfPermission(Manifest.permission.CAMERA)
@@ -101,47 +105,44 @@ public class DoorbellActivity extends Activity {
         mCloudThread.start();
         mCloudHandler = new Handler(mCloudThread.getLooper());
 
-        // Initialize the doorbell button driver
-        try {
-            mButton = new Button(BUTTON_GPIO_PIN, Button.LogicState.PRESSED_WHEN_LOW);
-            mButton.setOnButtonEventListener(mButtonCallback);
-        } catch (IOException e) {
-            Log.e(TAG, "button driver error", e);
-        }
         // Camera code is complicated, so we've shoved it all in this closet class for you.
         mCamera = DoorbellCamera.getInstance();
         mCamera.initializeCamera(this, mCameraHandler, mOnImageAvailableListener);
+
+        ScheduledExecutorService service = Executors.newSingleThreadScheduledExecutor();
+
+        service.scheduleAtFixedRate(new TimerTask() {
+            @Override
+            public void run() {
+                mCameraHandler.post(new TimerTask() {
+                    @Override
+                    public void run() {
+                        Log.d(TAG, "take picture");
+                        mCamera.takeCapture();
+                    }
+                });
+            }
+        }, 1000, 2000, TimeUnit.MILLISECONDS);
     }
 
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+
+
+    }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
         mCamera.shutDown();
 
+        mImageView.setImageDrawable(null);
+
         mCameraThread.quitSafely();
         mCloudThread.quitSafely();
-        try {
-            mButton.close();
-        } catch (IOException e) {
-            Log.e(TAG, "button driver error", e);
-        }
     }
-
-    /**
-     * Callback for button events.
-     */
-    private Button.OnButtonEventListener mButtonCallback = new Button.OnButtonEventListener() {
-        @Override
-
-        public void onButtonEvent(Button button, boolean pressed) {
-            if (pressed) {
-                // Doorbell rang!
-                Log.d(TAG, "button pressed");
-                mCamera.takePicture();
-            }
-        }
-    };
 
     /**
      * Listener for new camera images.
@@ -155,9 +156,20 @@ public class DoorbellActivity extends Activity {
             ByteBuffer imageBuf = image.getPlanes()[0].getBuffer();
             final byte[] imageBytes = new byte[imageBuf.remaining()];
             imageBuf.get(imageBytes);
+
+            final Bitmap bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.length);
+
+            mHandler.post(new TimerTask() {
+                @Override
+                public void run() {
+                    mImageView.setImageBitmap(bitmap);
+
+                }
+            });
+
             image.close();
 
-            onPictureTaken(imageBytes);
+//            onPictureTaken(imageBytes);
         }
     };
 

@@ -31,7 +31,9 @@ import android.os.Handler;
 import android.util.Log;
 import android.util.Size;
 
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 
 import static android.content.Context.CAMERA_SERVICE;
 
@@ -133,7 +135,7 @@ public class DoorbellCamera {
     /**
      * Begin a still image capture
      */
-    public void takePicture() {
+    public void takeCapture() {
         if (mCameraDevice == null) {
             Log.w(TAG, "Cannot capture image. Camera not initialized.");
             return;
@@ -150,6 +152,7 @@ public class DoorbellCamera {
         }
     }
 
+
     /**
      * Callback handling session state changes
      */
@@ -159,6 +162,7 @@ public class DoorbellCamera {
                 public void onConfigured(CameraCaptureSession cameraCaptureSession) {
                     // The camera is already closed
                     if (mCameraDevice == null) {
+                        Log.d(TAG, "camera is already closed");
                         return;
                     }
 
@@ -177,11 +181,20 @@ public class DoorbellCamera {
      * Execute a new capture request within the active session
      */
     private void triggerImageCapture() {
+        Log.d(TAG, "triggerImageCapture");
+
         try {
             final CaptureRequest.Builder captureBuilder =
                     mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
             captureBuilder.addTarget(mImageReader.getSurface());
-            captureBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
+
+            // プレビューがぼやけては困るのでオートフォーカスを利用する
+            captureBuilder.set(CaptureRequest.CONTROL_AF_MODE,
+                    CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+            // 露出、フラッシュは自動モードを仕様する
+            captureBuilder.set(CaptureRequest.CONTROL_AE_MODE,
+                    CaptureRequest.CONTROL_AE_MODE_ON);
+
             Log.d(TAG, "Session initialized.");
             mCaptureSession.capture(captureBuilder.build(), mCaptureCallback, null);
         } catch (CameraAccessException cae) {
